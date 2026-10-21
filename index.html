@@ -5,27 +5,33 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ZIET Mumbai E-Content Hub</title>
+
 <style>
 *{box-sizing:border-box}
-body{margin:0;font-family:Arial,sans-serif;background:#f3f7fc;color:#183153}
+body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#f3f7fc;color:#183153}
 header{background:#12345a;color:white;text-align:center;padding:28px 16px}
 header h1{margin:0 0 10px;font-size:clamp(24px,4vw,36px)}
 header p{margin:6px 0;line-height:1.5}
-main{max-width:1100px;margin:24px auto;padding:0 16px}
+main{max-width:1200px;margin:24px auto;padding:0 16px}
 .toolbar{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0}
 input{flex:1;min-width:220px;padding:13px;border:1px solid #b8c8da;border-radius:8px;font-size:16px}
 button,.btn{border:0;border-radius:8px;padding:12px 18px;background:#1769aa;color:white;font-weight:bold;cursor:pointer;text-decoration:none;display:inline-block}
-button:disabled{opacity:.5;cursor:wait}
-.status{padding:12px;background:#e5eef9;border-radius:8px;margin:14px 0;line-height:1.6;overflow-wrap:anywhere}
+button:disabled{opacity:.55;cursor:wait}
+.status{padding:13px;background:#e5eef9;border-radius:8px;margin:14px 0;line-height:1.6;overflow-wrap:anywhere}
+.progress{height:8px;background:#d5e1ef;border-radius:10px;overflow:hidden;margin-top:8px}
+#progressBar{height:100%;width:0%;background:#1769aa;transition:width .2s}
 #grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px}
-.card{background:white;border:1px solid #dbe5f0;border-radius:12px;padding:18px;box-shadow:0 3px 12px #17365d10;overflow-wrap:anywhere}
+.card{background:white;border:1px solid #dbe5f0;border-radius:12px;padding:18px;box-shadow:0 3px 12px #17365d10;overflow-wrap:anywhere;min-width:0}
 .card h3{margin:0 0 12px;font-size:18px}
 .meta{font-size:13px;color:#53677d;line-height:1.8;margin-bottom:14px}
 #moreWrap{text-align:center;margin:24px 0}
 .small{font-size:13px;color:#53677d;line-height:1.6}
 footer{text-align:center;background:#12345a;color:white;padding:18px;font-size:13px;line-height:1.7}
+.hidden{display:none}
+@media(max-width:520px){main{padding:0 12px}.toolbar input{min-width:100%}}
 </style>
 </head>
+
 <body>
 <header>
   <h1>ZIET Mumbai E-Content Hub</h1>
@@ -40,22 +46,26 @@ footer{text-align:center;background:#12345a;color:white;padding:18px;font-size:1
 
   <div class="toolbar">
     <input id="search" type="search"
-      placeholder="Search title, class, subject or type..."
+      placeholder="Search title, class, subject, type or resource ID..."
       aria-label="Search resources">
     <button id="searchBtn" type="button">Search</button>
-    <button id="resetBtn" type="button">Reset</button>
+    <button id="resetBtn" type="button">Reset Search</button>
   </div>
 
-  <div id="status" class="status" role="status" aria-live="polite">
-    Connecting to the resource server...
+  <div class="status" role="status" aria-live="polite">
+    <div id="statusText">Connecting to the resource server...</div>
+    <div class="progress"><div id="progressBar"></div></div>
   </div>
+
   <div id="grid"></div>
+
   <div id="moreWrap">
-    <button id="moreBtn" type="button" hidden>Load More Resources</button>
+    <button id="retryBtn" type="button" class="hidden">Retry Loading</button>
   </div>
+
   <p class="small">
-    Resources are loaded from the existing ZIET Mumbai Apps Script backend.
-    Search filters resources loaded so far.
+    Resources are retrieved from the existing ZIET Mumbai Apps Script backend.
+    Search filters the resources loaded into this page.
   </p>
 </main>
 
@@ -68,21 +78,26 @@ footer{text-align:center;background:#12345a;color:white;padding:18px;font-size:1
 (function(){
   "use strict";
 
-  const API = "https://script.google.com/macros/s/AKfycbz9XY0wxuavCpbUbURGrSB0vWKurkwh1Q1BdK7NjkfPBrYPRvFvGE3cKwCbuKvpnLhUUw/exec";
-  const PAGE_SIZE = 100;
+  const API =
+    "https://script.google.com/macros/s/AKfycbz9XY0wxuavCpbUbURGrSB0vWKurkwh1Q1BdK7NjkfPBrYPRvFvGE3cKwCbuKvpnLhUUw/exec";
 
-  const statusEl = document.getElementById("status");
+  // Load 250 resources per request; continue automatically until complete.
+  const PAGE_SIZE = 250;
+
+  const statusText = document.getElementById("statusText");
+  const progressBar = document.getElementById("progressBar");
   const grid = document.getElementById("grid");
-  const moreBtn = document.getElementById("moreBtn");
   const searchEl = document.getElementById("search");
   const searchBtn = document.getElementById("searchBtn");
   const resetBtn = document.getElementById("resetBtn");
+  const retryBtn = document.getElementById("retryBtn");
 
   let resources = [];
   let offset = 0;
-  let total = 2413;
+  let total = 0;
   let loading = false;
-  let requestId = 0;
+  let failed = false;
+  let searchTimer = null;
 
   function firstValue(obj, keys){
     for(const key of keys){
@@ -100,28 +115,27 @@ footer{text-align:center;background:#12345a;color:white;padding:18px;font-size:1
     ]) || "Untitled resource");
   }
 
-  // The backend's populated field is "Resource URL".
-  // Other URL aliases are fallbacks only.
+  // "Resource URL" is the populated URL field in the verified API response.
   function resourceURL(item){
     const raw = firstValue(item,[
-      "Resource URL","resourceUrl","resource_url",
-      "Drive URL","Web View Link","webViewLink",
-      "web_view_link","File URL","fileUrl","file_url",
-      "URL","url","Link","link"
+      "Resource URL","Resource Url","resourceUrl","resource_url",
+      "Drive URL","Web View Link","webViewLink","web_view_link",
+      "File URL","fileUrl","file_url","URL","url","Link","link"
     ]);
-    const url = String(raw || "").trim();
 
+    const url = String(raw || "").trim();
     if(!/^https?:\/\//i.test(url)) return "";
+
     try{
       const parsed = new URL(url);
-      if(parsed.protocol !== "https:" && parsed.protocol !== "http:") return "";
-      return parsed.href;
+      return (parsed.protocol === "https:" || parsed.protocol === "http:")
+        ? parsed.href : "";
     }catch(_){
       return "";
     }
   }
 
-  function resourceArray(data){
+  function getResourceArray(data){
     if(Array.isArray(data)) return data;
     for(const key of ["resources","items","results","data","records"]){
       if(data && Array.isArray(data[key])) return data[key];
@@ -129,12 +143,53 @@ footer{text-align:center;background:#12345a;color:white;padding:18px;font-size:1
     return [];
   }
 
-  function addText(parent, tag, text, className){
-    const el = document.createElement(tag);
-    el.textContent = text;
-    if(className) el.className = className;
-    parent.appendChild(el);
-    return el;
+  function jsonp(params){
+    return new Promise((resolve,reject) => {
+      const callback = "__zietCallback_" +
+        Date.now() + "_" + Math.random().toString(36).slice(2);
+
+      const script = document.createElement("script");
+      let completed = false;
+
+      const timeout = setTimeout(() => {
+        finish(new Error("Request timed out. Check the connection and retry."));
+      },30000);
+
+      function finish(error,data){
+        if(completed) return;
+        completed = true;
+        clearTimeout(timeout);
+        try{ delete window[callback]; }
+        catch(_){ window[callback] = undefined; }
+        script.remove();
+
+        if(error) reject(error);
+        else resolve(data);
+      }
+
+      window[callback] = data => finish(null,data);
+
+      const query = new URLSearchParams();
+      Object.entries(params).forEach(([key,value]) => {
+        query.set(key,String(value));
+      });
+      query.set("callback",callback);
+
+      script.onerror = () => finish(
+        new Error("Could not connect to the Apps Script backend.")
+      );
+
+      script.src = API + "?" + query.toString();
+      document.head.appendChild(script);
+    });
+  }
+
+  function updateStatus(message){
+    statusText.textContent = message;
+    const percent = total > 0
+      ? Math.min(100,(resources.length / total) * 100)
+      : 0;
+    progressBar.style.width = percent + "%";
   }
 
   function render(){
@@ -143,11 +198,12 @@ footer{text-align:center;background:#12345a;color:white;padding:18px;font-size:1
     const filtered = resources.filter(item => {
       const searchable = [
         resourceTitle(item),
+        firstValue(item,["Resource ID","resourceId"]),
         firstValue(item,["Class","class","Grade","grade"]),
         firstValue(item,["Subject","subject"]),
         firstValue(item,["Resource Type","resourceType","Type","type"]),
         firstValue(item,["Category","category"]),
-        firstValue(item,["Resource ID","resourceId"])
+        firstValue(item,["Source Tab","sourceTab"])
       ].join(" ").toLowerCase();
 
       return searchable.includes(query);
@@ -156,17 +212,20 @@ footer{text-align:center;background:#12345a;color:white;padding:18px;font-size:1
     grid.replaceChildren();
 
     if(filtered.length === 0){
-      addText(grid,"p",
-        query
-          ? "No matching resources in the loaded records. Load more resources or try another search."
-          : "No resources returned by the backend.");
+      const message = document.createElement("p");
+      message.textContent = query
+        ? "No matching resources found in the loaded records."
+        : "No resource records were returned.";
+      grid.appendChild(message);
     }
 
     filtered.forEach(item => {
       const card = document.createElement("article");
       card.className = "card";
 
-      addText(card,"h3",resourceTitle(item));
+      const heading = document.createElement("h3");
+      heading.textContent = resourceTitle(item);
+      card.appendChild(heading);
 
       const meta = document.createElement("div");
       meta.className = "meta";
@@ -181,7 +240,11 @@ footer{text-align:center;background:#12345a;color:white;padding:18px;font-size:1
 
       fields.forEach(([label,keys]) => {
         const val = firstValue(item,keys);
-        if(val !== "") addText(meta,"div",label + ": " + val);
+        if(val !== ""){
+          const line = document.createElement("div");
+          line.textContent = label + ": " + val;
+          meta.appendChild(line);
+        }
       });
 
       card.appendChild(meta);
@@ -196,117 +259,120 @@ footer{text-align:center;background:#12345a;color:white;padding:18px;font-size:1
         link.textContent = "Open Resource ↗";
         card.appendChild(link);
       }else{
-        addText(card,"p",
-          "No valid Resource URL is available for this item.","small");
+        const note = document.createElement("p");
+        note.className = "small";
+        note.textContent = "No valid Resource URL is available for this record.";
+        card.appendChild(note);
       }
 
       grid.appendChild(card);
     });
 
-    statusEl.textContent =
-      resources.length + " of " + total + " resources loaded · " +
-      filtered.length + " matching loaded resources.";
-
-    moreBtn.hidden = !(offset < total);
+    updateStatus(
+      (total ? resources.length + " of " + total : resources.length) +
+      " resources loaded · " + filtered.length +
+      " matching resources" +
+      (failed ? " · Loading incomplete; use Retry Loading." :
+       loading ? " · Loading remaining resources automatically..." :
+       resources.length >= total && total > 0 ? " · All resources loaded." : "")
+    );
   }
 
-  function requestJSONP(params){
-    return new Promise((resolve,reject) => {
-      const callback = "__zietJsonp_" +
-        Date.now() + "_" + Math.random().toString(36).slice(2);
-
-      const script = document.createElement("script");
-      let finished = false;
-
-      const timeout = setTimeout(() => {
-        finish(new Error("The resource server timed out."));
-      },20000);
-
-      function finish(error,data){
-        if(finished) return;
-        finished = true;
-        clearTimeout(timeout);
-        try{ delete window[callback]; }catch(_){ window[callback] = undefined; }
-        script.remove();
-        if(error) reject(error);
-        else resolve(data);
-      }
-
-      window[callback] = data => finish(null,data);
-
-      const query = new URLSearchParams();
-      Object.entries(params).forEach(([key,val]) => query.set(key,String(val)));
-      query.set("callback",callback);
-
-      script.onerror = () => finish(
-        new Error("Could not load the Apps Script response.")
-      );
-
-      script.src = API + "?" + query.toString();
-      document.head.appendChild(script);
-    });
-  }
-
-  async function loadBatch(){
-    if(loading || offset >= total) return;
+  async function loadAllResources(){
+    if(loading) return;
 
     loading = true;
-    const currentRequest = ++requestId;
-    moreBtn.disabled = true;
-    statusEl.textContent = "Loading resources...";
+    failed = false;
+    retryBtn.classList.add("hidden");
+    render();
 
     try{
-      const data = await requestJSONP({
-        action:"list",
-        limit:PAGE_SIZE,
-        offset:offset
-      });
+      // Read the authoritative total from the backend first.
+      if(total === 0){
+        const first = await jsonp({
+          action:"list",
+          limit:PAGE_SIZE,
+          offset:0
+        });
 
-      if(currentRequest !== requestId) return;
-
-      if(!data || data.success !== true){
-        throw new Error(data && data.error
-          ? data.error
-          : "The backend did not confirm success.");
-      }
-
-      const batch = resourceArray(data);
-      const reportedTotal = Number(data.total);
-
-      if(Number.isFinite(reportedTotal) && reportedTotal >= 0){
-        total = reportedTotal;
-      }
-
-      if(batch.length === 0){
-        offset = total;
-        render();
-        if(resources.length === 0){
-          statusEl.textContent = "The server returned no resource records.";
+        if(!first || first.success !== true){
+          throw new Error(first && first.error
+            ? first.error : "The backend did not confirm success.");
         }
-        return;
+
+        const firstBatch = getResourceArray(first);
+        const reportedTotal = Number(first.total);
+
+        total = Number.isFinite(reportedTotal) && reportedTotal >= 0
+          ? reportedTotal : firstBatch.length;
+
+        resources = firstBatch;
+        offset = Number(first.offset || 0) + firstBatch.length;
+
+        render();
       }
 
-      resources = resources.concat(batch);
-      offset = Number(data.offset) + batch.length;
+      // Sequential requests avoid overloading the backend.
+      while(offset < total){
+        const data = await jsonp({
+          action:"list",
+          limit:PAGE_SIZE,
+          offset:offset
+        });
 
-      if(!Number.isFinite(offset)) offset = resources.length;
+        if(!data || data.success !== true){
+          throw new Error(data && data.error
+            ? data.error : "The backend returned an unsuccessful response.");
+        }
 
+        const batch = getResourceArray(data);
+        const batchOffset = Number(data.offset);
+
+        if(batch.length === 0){
+          // Stop safely rather than making endless empty requests.
+          throw new Error(
+            "The backend returned an empty batch before all resources were loaded."
+          );
+        }
+
+        resources = resources.concat(batch);
+
+        offset = Number.isFinite(batchOffset)
+          ? batchOffset + batch.length
+          : resources.length;
+
+        const reportedTotal = Number(data.total);
+        if(Number.isFinite(reportedTotal) && reportedTotal >= 0){
+          total = reportedTotal;
+        }
+
+        render();
+      }
+
+      failed = false;
       render();
 
     }catch(error){
-      statusEl.textContent =
-        "Unable to load resources: " + error.message +
-        " Your existing Apps Script portal has not been changed.";
+      failed = true;
+      render();
+      statusText.textContent =
+        "Loaded " + resources.length + " of " + total +
+        " resources. " + error.message +
+        " Select Retry Loading to continue.";
+      retryBtn.classList.remove("hidden");
     }finally{
       loading = false;
-      moreBtn.disabled = false;
+      render();
     }
   }
 
-  moreBtn.addEventListener("click",loadBatch);
-  searchBtn.addEventListener("click",render);
-  searchEl.addEventListener("input",render);
+  function renderSearch(){
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(render,100);
+  }
 
+  searchEl.addEventListener("input",renderSearch);
+  searchBtn.addEventListener("click",render);
   searchEl.addEventListener("keydown",event => {
     if(event.key === "Enter") render();
   });
@@ -316,7 +382,12 @@ footer{text-align:center;background:#12345a;color:white;padding:18px;font-size:1
     render();
   });
 
-  loadBatch();
+  retryBtn.addEventListener("click",() => {
+    retryBtn.classList.add("hidden");
+    loadAllResources();
+  });
+
+  loadAllResources();
 })();
 </script>
 </body>
