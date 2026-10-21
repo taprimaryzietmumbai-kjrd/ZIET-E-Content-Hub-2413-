@@ -8,22 +8,22 @@
 <style>
 *{box-sizing:border-box}
 body{margin:0;font-family:Arial,sans-serif;background:#f3f7fc;color:#183153}
-header{background:#12345a;color:#fff;text-align:center;padding:28px 16px}
+header{background:#12345a;color:white;text-align:center;padding:28px 16px}
 header h1{margin:0 0 10px;font-size:clamp(24px,4vw,36px)}
 header p{margin:6px 0;line-height:1.5}
 main{max-width:1100px;margin:24px auto;padding:0 16px}
 .toolbar{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0}
 input{flex:1;min-width:220px;padding:13px;border:1px solid #b8c8da;border-radius:8px;font-size:16px}
-button,.btn{border:0;border-radius:8px;padding:12px 18px;background:#1769aa;color:#fff;font-weight:bold;cursor:pointer;text-decoration:none;display:inline-block}
+button,.btn{border:0;border-radius:8px;padding:12px 18px;background:#1769aa;color:white;font-weight:bold;cursor:pointer;text-decoration:none;display:inline-block}
 button:disabled{opacity:.5;cursor:wait}
-.status{padding:12px;background:#e5eef9;border-radius:8px;margin:14px 0;line-height:1.5}
+.status{padding:12px;background:#e5eef9;border-radius:8px;margin:14px 0;line-height:1.6;overflow-wrap:anywhere}
 #grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px}
 .card{background:white;border:1px solid #dbe5f0;border-radius:12px;padding:18px;box-shadow:0 3px 12px #17365d10;overflow-wrap:anywhere}
 .card h3{margin:0 0 12px;font-size:18px}
-.meta{font-size:13px;color:#53677d;line-height:1.7;margin-bottom:14px}
+.meta{font-size:13px;color:#53677d;line-height:1.8;margin-bottom:14px}
 #moreWrap{text-align:center;margin:24px 0}
+.small{font-size:13px;color:#53677d;line-height:1.6}
 footer{text-align:center;background:#12345a;color:white;padding:18px;font-size:13px;line-height:1.7}
-.small{font-size:13px;color:#53677d}
 </style>
 </head>
 <body>
@@ -36,20 +36,27 @@ footer{text-align:center;background:#12345a;color:white;padding:18px;font-size:1
 
 <main>
   <h2>Digital Learning Resources</h2>
-  <p>Search the resources returned by the ZIET Mumbai resource index.</p>
+  <p>Browse and search the ZIET Mumbai educational resource index.</p>
 
   <div class="toolbar">
-    <input id="search" type="search" placeholder="Search title, class, subject..." aria-label="Search resources">
+    <input id="search" type="search"
+      placeholder="Search title, class, subject or type..."
+      aria-label="Search resources">
     <button id="searchBtn" type="button">Search</button>
     <button id="resetBtn" type="button">Reset</button>
   </div>
 
-  <div id="status" class="status" role="status">Connecting to the resource server...</div>
+  <div id="status" class="status" role="status" aria-live="polite">
+    Connecting to the resource server...
+  </div>
   <div id="grid"></div>
   <div id="moreWrap">
-    <button id="moreBtn" type="button" hidden>Load More</button>
+    <button id="moreBtn" type="button" hidden>Load More Resources</button>
   </div>
-  <p class="small">Resource availability depends on the existing Apps Script backend and the URLs in the master index.</p>
+  <p class="small">
+    Resources are loaded from the existing ZIET Mumbai Apps Script backend.
+    Search filters resources loaded so far.
+  </p>
 </main>
 
 <footer>
@@ -71,22 +78,50 @@ footer{text-align:center;background:#12345a;color:white;padding:18px;font-size:1
   const searchBtn = document.getElementById("searchBtn");
   const resetBtn = document.getElementById("resetBtn");
 
-  let allResources = [];
+  let resources = [];
   let offset = 0;
-  let total = null;
+  let total = 2413;
   let loading = false;
-  let requestNumber = 0;
+  let requestId = 0;
 
-  function value(obj, names){
-    for(const name of names){
-      if(obj && obj[name] !== undefined && obj[name] !== null && obj[name] !== ""){
-        return obj[name];
+  function firstValue(obj, keys){
+    for(const key of keys){
+      const val = obj && obj[key];
+      if(val !== undefined && val !== null && String(val).trim() !== ""){
+        return val;
       }
     }
     return "";
   }
 
-  function getArray(data){
+  function resourceTitle(item){
+    return String(firstValue(item,[
+      "Resource Title","title","Title","name","Name"
+    ]) || "Untitled resource");
+  }
+
+  // The backend's populated field is "Resource URL".
+  // Other URL aliases are fallbacks only.
+  function resourceURL(item){
+    const raw = firstValue(item,[
+      "Resource URL","resourceUrl","resource_url",
+      "Drive URL","Web View Link","webViewLink",
+      "web_view_link","File URL","fileUrl","file_url",
+      "URL","url","Link","link"
+    ]);
+    const url = String(raw || "").trim();
+
+    if(!/^https?:\/\//i.test(url)) return "";
+    try{
+      const parsed = new URL(url);
+      if(parsed.protocol !== "https:" && parsed.protocol !== "http:") return "";
+      return parsed.href;
+    }catch(_){
+      return "";
+    }
+  }
+
+  function resourceArray(data){
     if(Array.isArray(data)) return data;
     for(const key of ["resources","items","results","data","records"]){
       if(data && Array.isArray(data[key])) return data[key];
@@ -94,68 +129,65 @@ footer{text-align:center;background:#12345a;color:white;padding:18px;font-size:1
     return [];
   }
 
-  function getTitle(item){
-    return String(value(item,["Title","title","Resource Title","Name","name","File Name","File Name (Drive)"]) || "Untitled resource");
-  }
-
-  function getUrl(item){
-    return String(value(item,[
-      "Resource URL","Resource Url","resourceUrl","url","URL",
-      "Drive URL","Web View Link","Link","link"
-    ]) || "");
+  function addText(parent, tag, text, className){
+    const el = document.createElement(tag);
+    el.textContent = text;
+    if(className) el.className = className;
+    parent.appendChild(el);
+    return el;
   }
 
   function render(){
     const query = searchEl.value.trim().toLowerCase();
-    const filtered = allResources.filter(item => {
-      const text = [
-        getTitle(item),
-        value(item,["Class","class","Grade","grade"]),
-        value(item,["Subject","subject"]),
-        value(item,["Category","category","Type","type"])
+
+    const filtered = resources.filter(item => {
+      const searchable = [
+        resourceTitle(item),
+        firstValue(item,["Class","class","Grade","grade"]),
+        firstValue(item,["Subject","subject"]),
+        firstValue(item,["Resource Type","resourceType","Type","type"]),
+        firstValue(item,["Category","category"]),
+        firstValue(item,["Resource ID","resourceId"])
       ].join(" ").toLowerCase();
-      return text.includes(query);
+
+      return searchable.includes(query);
     });
 
     grid.replaceChildren();
 
     if(filtered.length === 0){
-      const p = document.createElement("p");
-      p.textContent = query
-        ? "No matching resources in the resources loaded so far. Load more resources or try another search."
-        : "No resources were returned. Check the API response.";
-      grid.appendChild(p);
+      addText(grid,"p",
+        query
+          ? "No matching resources in the loaded records. Load more resources or try another search."
+          : "No resources returned by the backend.");
     }
 
     filtered.forEach(item => {
       const card = document.createElement("article");
       card.className = "card";
 
-      const heading = document.createElement("h3");
-      heading.textContent = getTitle(item);
-      card.appendChild(heading);
+      addText(card,"h3",resourceTitle(item));
 
       const meta = document.createElement("div");
       meta.className = "meta";
+
       const fields = [
+        ["Resource ID",["Resource ID","resourceId"]],
         ["Class",["Class","class","Grade","grade"]],
         ["Subject",["Subject","subject"]],
-        ["Category",["Category","category"]],
-        ["Type",["Resource Type","Type","type"]]
+        ["Type",["Resource Type","resourceType","Type","type"]],
+        ["Source",["Source Tab","sourceTab"]]
       ];
 
-      fields.forEach(([label, keys]) => {
-        const v = value(item,keys);
-        if(v !== ""){
-          const line = document.createElement("div");
-          line.textContent = label + ": " + v;
-          meta.appendChild(line);
-        }
+      fields.forEach(([label,keys]) => {
+        const val = firstValue(item,keys);
+        if(val !== "") addText(meta,"div",label + ": " + val);
       });
+
       card.appendChild(meta);
 
-      const url = getUrl(item);
-      if(url && /^https?:\/\//i.test(url)){
+      const url = resourceURL(item);
+      if(url){
         const link = document.createElement("a");
         link.className = "btn";
         link.href = url;
@@ -164,125 +196,127 @@ footer{text-align:center;background:#12345a;color:white;padding:18px;font-size:1
         link.textContent = "Open Resource ↗";
         card.appendChild(link);
       }else{
-        const note = document.createElement("p");
-        note.className = "small";
-        note.textContent = "No valid resource URL is available for this record.";
-        card.appendChild(note);
+        addText(card,"p",
+          "No valid Resource URL is available for this item.","small");
       }
 
       grid.appendChild(card);
     });
 
-    const countText = total === null
-      ? allResources.length + " resources loaded"
-      : allResources.length + " of " + total + " resources loaded";
+    statusEl.textContent =
+      resources.length + " of " + total + " resources loaded · " +
+      filtered.length + " matching loaded resources.";
 
-    statusEl.textContent = countText + " · Showing " + filtered.length +
-      " matching loaded resources. Search checks loaded resources only.";
-
-    moreBtn.hidden = !(total === null || offset < total);
+    moreBtn.hidden = !(offset < total);
   }
 
   function requestJSONP(params){
     return new Promise((resolve,reject) => {
-      const callbackName = "__zietCallback_" + Date.now() + "_" +
-        Math.random().toString(36).slice(2);
+      const callback = "__zietJsonp_" +
+        Date.now() + "_" + Math.random().toString(36).slice(2);
+
       const script = document.createElement("script");
-      const timeout = setTimeout(() => finish(new Error("API request timed out.")),20000);
       let finished = false;
+
+      const timeout = setTimeout(() => {
+        finish(new Error("The resource server timed out."));
+      },20000);
 
       function finish(error,data){
         if(finished) return;
         finished = true;
         clearTimeout(timeout);
-        delete window[callbackName];
+        try{ delete window[callback]; }catch(_){ window[callback] = undefined; }
         script.remove();
         if(error) reject(error);
         else resolve(data);
       }
 
-      window[callbackName] = data => finish(null,data);
-      const query = new URLSearchParams({
-        ...params,
-        callback: callbackName
-      });
+      window[callback] = data => finish(null,data);
+
+      const query = new URLSearchParams();
+      Object.entries(params).forEach(([key,val]) => query.set(key,String(val)));
+      query.set("callback",callback);
+
+      script.onerror = () => finish(
+        new Error("Could not load the Apps Script response.")
+      );
+
       script.src = API + "?" + query.toString();
-      script.onerror = () => finish(new Error("Could not connect to the Apps Script API."));
       document.head.appendChild(script);
     });
   }
 
-  async function loadResources(reset){
-    if(loading) return;
-    loading = true;
-    const thisRequest = ++requestNumber;
-    moreBtn.disabled = true;
-    statusEl.textContent = reset ? "Loading resources..." : "Loading more resources...";
+  async function loadBatch(){
+    if(loading || offset >= total) return;
 
-    if(reset){
-      offset = 0;
-      total = null;
-      allResources = [];
-      grid.replaceChildren();
-    }
+    loading = true;
+    const currentRequest = ++requestId;
+    moreBtn.disabled = true;
+    statusEl.textContent = "Loading resources...";
 
     try{
       const data = await requestJSONP({
         action:"list",
-        limit:String(PAGE_SIZE),
-        offset:String(offset)
+        limit:PAGE_SIZE,
+        offset:offset
       });
 
-      if(thisRequest !== requestNumber) return;
+      if(currentRequest !== requestId) return;
 
-      if(data && data.success === false){
-        throw new Error(data.error || data.message || "The backend returned an error.");
+      if(!data || data.success !== true){
+        throw new Error(data && data.error
+          ? data.error
+          : "The backend did not confirm success.");
       }
 
-      const rows = getArray(data);
-      if(!rows.length && offset === 0){
-        throw new Error("The API response did not contain a recognised resource array. Check the response format and callback support.");
-      }
+      const batch = resourceArray(data);
+      const reportedTotal = Number(data.total);
 
-      allResources = allResources.concat(rows);
-      offset += rows.length;
-
-      const reportedTotal = Number(value(data,["total","totalCount","count"]));
       if(Number.isFinite(reportedTotal) && reportedTotal >= 0){
         total = reportedTotal;
-      }else if(rows.length < PAGE_SIZE){
-        total = offset;
       }
 
-      if(rows.length === 0) total = offset;
+      if(batch.length === 0){
+        offset = total;
+        render();
+        if(resources.length === 0){
+          statusEl.textContent = "The server returned no resource records.";
+        }
+        return;
+      }
+
+      resources = resources.concat(batch);
+      offset = Number(data.offset) + batch.length;
+
+      if(!Number.isFinite(offset)) offset = resources.length;
+
       render();
 
-    }catch(err){
-      statusEl.textContent = "Unable to load resources: " + err.message +
-        " Please check the Apps Script deployment and JSONP callback support.";
-      moreBtn.hidden = true;
+    }catch(error){
+      statusEl.textContent =
+        "Unable to load resources: " + error.message +
+        " Your existing Apps Script portal has not been changed.";
     }finally{
       loading = false;
       moreBtn.disabled = false;
     }
   }
 
-  moreBtn.addEventListener("click",() => loadResources(false));
+  moreBtn.addEventListener("click",loadBatch);
   searchBtn.addEventListener("click",render);
   searchEl.addEventListener("input",render);
+
   searchEl.addEventListener("keydown",event => {
     if(event.key === "Enter") render();
   });
+
   resetBtn.addEventListener("click",() => {
     searchEl.value = "";
-    if(total === null || offset < total){
-      loadResources(true);
-    }else{
-      render();
-    }
+    render();
   });
 
-  loadResources(true);
+  loadBatch();
 })();
 </script>
 </body>
