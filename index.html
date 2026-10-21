@@ -1,1 +1,141 @@
 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ZIET Mumbai | E-Content Hub</title>
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #183153;
+      background: #f3f7fc;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      background: linear-gradient(135deg, #12345a, #1769aa);
+      color: white;
+      text-align: center;
+      padding: 42px 20px;
+    }
+
+    header h1 {
+      margin: 0 0 12px;
+      font-size: clamp(25px, 4vw, 38px);
+    }
+
+    header p {
+      margin: 7px 0;
+      line-height: 1.6;
+    }
+
+    main {
+      width: min(760px, 92%);
+      margin: 42px auto;
+      flex: 1;
+    }
+
+    .card {
+      background: white;
+      padding: 32px 24px;
+      border-radius: 16px;
+      box-shadow: 0 6px 24px rgba(18, 52, 90, 0.10);
+      text-align: center;
+      border: 1px solid #dbe5f0;
+    }
+
+    .icon {
+      font-size: 48px;
+      margin-bottom: 12px;
+    }
+
+    h2 {
+      margin: 8px 0 14px;
+      color: #12345a;
+    }
+
+    .description {
+      color: #52657b;
+      line-height: 1.8;
+      margin: 0 auto 24px;
+    }
+
+    .open-button {
+      display: inline-block;
+      background: #1769aa;
+      color: white;
+      text-decoration: none;
+      padding: 15px 25px;
+      border-radius: 9px;
+      font-weight: bold;
+      line-height: 1.4;
+    }
+
+    .open-button:hover {
+      background: #12345a;
+    }
+
+    .note {
+      margin-top: 22px;
+      font-size: 13px;
+      color: #667085;
+      line-height: 1.6;
+    }
+
+    footer {
+      text-align: center;
+      padding: 22px 14px;
+      background: #12345a;
+      color: white;
+      font-size: 13px;
+      line-height: 1.8;
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>ZIET Mumbai E-Content Hub</h1>
+    <p>Interactive FLN Continuous Learning and Resource Portal</p>
+    <p>Zonal Institute of Education & Training, Mumbai</p>
+    <p>Kendriya Vidyalaya Sangathan</p>
+  </header>
+
+  <main>
+    <section class="card">
+      <div class="icon" aria-hidden="true">📚</div>
+      <h2>Welcome to the E-Content Hub</h2>
+      <p class="description">
+        Access the ZIET Mumbai digital resource repository for
+        teaching-learning materials, videos, presentations and
+        other educational resources.
+      </p>
+
+      <a
+        class="open-button"
+        href="https://script.google.com/macros/s/AKfycbz9XY0wxuavCpbUbURGrSB0vWKurkwh1Q1BdK7NjkfPBrYPRvFvGE3cKwCbuKvpnLhUUw/exec"
+        target="_blank"
+        rel="noopener noreferrer">
+        Open E-Content Hub ↗
+      </a>
+
+      <p class="note">
+        The resource portal opens separately. Your existing
+        Apps Script application remains unchanged.
+      </p>
+    </section>
+  </main>
+
+  <footer>
+    ZIET Mumbai · Kendriya Vidyalaya Sangathan<br>
+    Digital Resources for Teaching and Learning
+  </footer>
+</body>
+</html>
+
